@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
 
-const SocketEvent = {
+export const SocketEvent = {
   JOIN_REQUEST: "join-request",
   JOIN_ACCEPTED: "join-accepted",
   USER_JOINED: "user-joined",
@@ -27,10 +27,30 @@ const SocketEvent = {
   DRAWING_UPDATE: "drawing-update",
 };
 
-const createSocketContext = (url) => {
-  return {
-    socket: io(url),
-  };
-};
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
-export { SocketEvent, createSocketContext };
+export const socket = io(BACKEND_URL, {
+  transports: ["websocket"], 
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000,
+  autoConnect: true,
+  withCredentials: true,
+  path: "/socket.io/",
+});
+socket.on("connect", () => {
+  console.log("✅ Socket connected:", socket.id);
+});
+
+socket.on("disconnect", (reason) => {
+  console.log("❌ Socket disconnected:", reason);
+  if (reason === "io server disconnect") {
+    socket.connect(); // reconnect manually
+  }
+});
+
+socket.on("connect_error", (error) => {
+  console.error("❌ Connection error:", error.message);
+});
+
+export default socket;

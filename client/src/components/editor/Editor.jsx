@@ -1,154 +1,65 @@
-import { useAppContext } from "@/context/AppContext"
-import { useFileSystem } from "@/context/FileContext"
-import { useSettings } from "@/context/SettingContext"
-import { useSocket } from "@/context/SocketContext"
-import usePageEvents from "@/hooks/usePageEvents"
-import useResponsive from "@/hooks/useResponsive"
-import { editorThemes } from "@/resources/Themes"
-import { color } from "@uiw/codemirror-extensions-color"
-import { hyperLink } from "@uiw/codemirror-extensions-hyper-link"
-import { loadLanguage } from "@uiw/codemirror-extensions-langs"
-import CodeMirror, {
-    scrollPastEnd,
-} from "@uiw/react-codemirror"
-import { EditorView } from "@codemirror/view"
-import { useEffect, useMemo, useState, useRef, useCallback } from "react"
-import toast from "react-hot-toast"
-import { collaborativeHighlighting, updateRemoteUsers } from "./collaborativeHighlighting"
-import { SocketEvent } from "@/constants/SocketEvent"
+import { useEffect, useState, useCallback } from "react";
+import { useSocket } from "@/context/SocketContext";
+import { useAppContext } from "@/context/AppContext";
+import { useParams } from "react-router-dom";
 
-function Editor() {
-    const { users, currentUser } = useAppContext()
-    const { activeFile, setActiveFile } = useFileSystem()
-    const { theme, language, fontSize } = useSettings()
-    const { socket } = useSocket()
-    const { viewHeight } = useResponsive()
-    const [timeOut, setTimeOut] = useState(setTimeout(() => {}, 0))
-    const filteredUsers = useMemo(
-        () => users.filter((u) => u.username !== currentUser.username),
-        [users, currentUser],
-    )
-    const [extensions, setExtensions] = useState([])
-    const editorRef = useRef(null)
-    const [lastCursorPosition, setLastCursorPosition] = useState(0)
-    const [lastSelection, setLastSelection] = useState({})
-    const cursorMoveTimeoutRef = useRef(null)
+const Editor = () => {
+  const { socket } = useSocket();
+  const { currentUser } = useAppContext();
+  const { roomId } = useParams();
 
-    const onCodeChange = (code, view) => {
-        if (!activeFile) return
+  const [code, setCode] = useState("// Start typing your code here...");
 
-        const file = { ...activeFile, content: code }
-        setActiveFile(file)
+  // ✅ Emit code changes to others
+  const handleCodeChange = useCallback(
+    (e) => {
+      const value = e.target.value;
+      setCode(value);
+      if (socket && roomId) {
+        socket.emit("code-change", { roomId, code: value });
+      }
+    },
+    [socket, roomId]
+  );
 
-        // Get cursor position and selection range
-        const selection = view.state?.selection?.main
-        const cursorPosition = selection?.head || 0
-        const selectionStart = selection?.from
-        const selectionEnd = selection?.to
+  // ✅ Listen for remote code updates from others
+  useEffect(() => {
+    const handleRemoteCodeUpdate = (event) => {
+      const remoteCode = event.detail;
+      // Prevent overriding your own changes
+      setCode(remoteCode);
+    };
 
-        // Emit cursor and selection data
-        socket.emit("typing_start", {
-            cursorPosition,
-            selectionStart,
-            selectionEnd
-        })
-        socket.emit("file_updated", {
-            fileId: activeFile.id,
-            newContent: code,
-        })
-        clearTimeout(timeOut)
+    window.addEventListener("remote-code-update", handleRemoteCodeUpdate);
 
-        const newTimeOut = setTimeout(
-            () => socket.emit("typing_pause"),
-            1000,
-        )
-        setTimeOut(newTimeOut)
-    }
+    return () => {
+      window.removeEventListener("remote-code-update", handleRemoteCodeUpdate);
+    };
+  }, []);
 
-    // Handle cursor/selection changes without typing
-    const handleSelectionChange = useCallback((view) => {
-        if (!view.selectionSet) return
+  // ✅ Listen directly from socket (optional redundancy)
+  useEffect(() => {
+    if (!socket) return;
 
-        const selection = view.state?.selection?.main
-        const cursorPosition = selection?.head || 0
-        const selectionStart = selection?.from
-        const selectionEnd = selection?.to
+    socket.on("code-change", ({ code: updatedCode }) => {
+      setCode(updatedCode);
+    });
 
-        // Check if cursor or selection actually changed
-        const cursorChanged = cursorPosition !== lastCursorPosition
-        const selectionChanged = selectionStart !== lastSelection.start || selectionEnd !== lastSelection.end
+    return () => {
+      socket.off("code-change");
+    };
+  }, [socket]);
 
-        if (cursorChanged || selectionChanged) {
-            setLastCursorPosition(cursorPosition)
-            setLastSelection({ start: selectionStart, end: selectionEnd })
+  return (
+    <div className="h-full w-full bg-[#1e1e1e] text-white p-3">
+      <textarea
+        value={code}
+        onChange={handleCodeChange}
+        placeholder="Start coding here..."
+        className="w-full h-full bg-transparent border-none outline-none resize-none text-lg font-mono"
+      />
+    </div>
+  );
+};
 
-            // Clear existing timeout
-            if (cursorMoveTimeoutRef.current) {
-                clearTimeout(cursorMoveTimeoutRef.current)
-            }
-
-            // Debounce cursor move events
-            cursorMoveTimeoutRef.current = setTimeout(() => {
-                socket.emit(SocketEvent.CURSOR_MOVE, {
-                    cursorPosition,
-                    selectionStart,
-                    selectionEnd
-                })
-            }, 100) // 100ms debounce
-        }
-    }, [lastCursorPosition, lastSelection, socket])
-
-    // Listen wheel event to zoom in/out and prevent page reload
-    usePageEvents()
-
-    useEffect(() => {
-        const extensions = [
-            color,
-            hyperLink,
-            collaborativeHighlighting(),
-            EditorView.updateListener.of(handleSelectionChange),
-            scrollPastEnd(),
-        ]
-        const langExt = loadLanguage(language.toLowerCase())
-        if (langExt) {
-            extensions.push(langExt)
-        } else {
-            toast.error(
-                "Syntax highlighting is unavailable for this language. Please adjust the editor settings; it may be listed under a different name.",
-                {
-                    duration: 5000,
-                },
-            )
-        }
-
-        setExtensions(extensions)
-    }, [filteredUsers, language, handleSelectionChange])
-
-    // Update remote users when filteredUsers changes
-    useEffect(() => {
-        if (editorRef.current?.view) {
-            editorRef.current.view.dispatch({
-                effects: updateRemoteUsers.of(filteredUsers)
-            })
-        }
-    }, [filteredUsers])
-
-    return (
-        <CodeMirror
-            ref={editorRef}
-            theme={editorThemes[theme]}
-            onChange={onCodeChange}
-            value={activeFile?.content}
-            extensions={extensions}
-            minHeight="100%"
-            maxWidth="100vw"
-            style={{
-                fontSize: fontSize + "px",
-                height: viewHeight,
-                position: "relative",
-            }}
-        />
-    )
-}
-
-export default Editor
+export default Editor;

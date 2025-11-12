@@ -1,56 +1,124 @@
 import { io } from "socket.io-client";
+// Backend URL configuration
+export const BACKEND_URL = "http://localhost:3000";
+const SOCKET_URL = BACKEND_URL;
+console.log("🔌 Connecting to WebSocket server at:", SOCKET_URL);
 
-// Remove the /api/socket.io path from the backend URL if present
-const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace(/\/api$/, '') || "http://localhost:3000";
-
-export const socket = io(backendUrl, {
-  // Let Socket.IO handle the best transport method
+export const socket = io(SOCKET_URL, {
+  // Connection settings
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  timeout: 10000,
   autoConnect: true,
   withCredentials: true,
-  // Enable both websocket and polling for better reliability
+  transports: ['websocket'],
+  upgrade: false,
+  // Try WebSocket first, fall back to polling
   transports: ["websocket", "polling"],
-  // Add timeout settings
-  timeout: 20000,
   // Enable debug in development
   debug: import.meta.env.DEV,
+  // Add query parameters for debugging
+  query: {
+    clientType: 'browser',
+    version: '1.0.0',
+  },
 });
 
 // Connection handlers
 socket.on("connect", () => {
-  console.log("✅ Socket connected:", socket.id);
+  console.log("✅ [Socket] Connected with ID:", socket.id);  
+  console.log("🔗 Connection URL:", SOCKET_URL);
+  console.log("📊 Transport:", socket.io.engine.transport.name);
 });
 
 socket.on("disconnect", (reason) => {
-  console.log("❌ Socket disconnected:", reason);
+  console.log("❌ [Socket] Disconnected. Reason:", reason);
+  
   if (reason === "io server disconnect") {
-    // Try to reconnect if server disconnects us
+    console.log("🔄 Server requested disconnect - attempting to reconnect...");
     socket.connect();
   }
 });
 
 socket.on("connect_error", (error) => {
-  console.error("❌ Connection error:", error.message);
-  // Attempt to reconnect with a delay
+  console.error("❌ [Socket] Connection error:", error.message);
+  console.error("Error details:", error);
+  
+  // Attempt to reconnect with exponential backoff
+  const delay = Math.min(socket.io._reconnectionAttempts * 1000, 10000);
+  console.log(`⏳ Reconnecting in ${delay}ms...`);
+  
   setTimeout(() => {
+    console.log("🔄 Attempting to reconnect...");
     socket.connect();
-  }, 1000);
+  }, delay);
 });
 
-// Log all events in development
+// Room and user events
+socket.on("join-accepted", (data) => {
+  console.log("🎉 [Socket] Join accepted:", data);
+  console.log(`👥 Users in room (${data.roomId}):`, data.users?.length || 0);
+});
+
+socket.on("user-joined", (data) => {
+  console.log(`👋 [Socket] User joined room ${data.roomId}:`, data.user);
+});
+
+socket.on("user-left", (data) => {
+  console.log(`👋 [Socket] User left:`, data.username || data.socketId);
+});
+
+// Debug logging for all events in development
 if (import.meta.env.DEV) {
+  // Log all emitted events
   const originalEmit = socket.emit;
   socket.emit = function (event, ...args) {
-    console.log(`📤 Emitting ${event}`, args);
+    console.group(`📤 [Socket] Emitting: ${event}`);
+    console.log("Arguments:", args);
+    console.groupEnd();
     return originalEmit.call(this, event, ...args);
   };
   
   // Log all received events
   socket.onAny((event, ...args) => {
-    console.log(`📥 Received ${event}`, args);
+    // Skip pong events to reduce noise
+    if (event === 'pong') return;
+    
+    console.group(`📥 [Socket] Received: ${event}`);
+    console.log("Data:", args);
+    console.groupEnd();
   });
+  
+  // Log transport upgrades
+  socket.io.engine.on("upgrade", (transport) => {
+    console.log("🔄 Transport upgraded to:", transport.name);
+  });
+}
+
+// Export a function to manually connect if needed
+export const connectSocket = () => {
+  if (!socket.connected) {
+    console.log("🔌 Manually connecting socket...");
+    socket.connect();
+  } else {
+    console.log("ℹ️ Socket is already connected");
+  }
+};
+
+// Export a function to disconnect
+export const disconnectSocket = () => {
+  if (socket.connected) {
+    console.log("🔌 Disconnecting socket...");
+    socket.disconnect();
+  }
+};
+
+// For debugging in browser console
+if (typeof window !== 'undefined') {
+  window.socket = socket;
+  console.log("ℹ️ Socket instance available as 'window.socket' for debugging");
 }
 
 export default socket;
