@@ -1,29 +1,36 @@
 import { io } from "socket.io-client";
-// Backend URL configuration
-export const BACKEND_URL = "http://localhost:3000";
-const SOCKET_URL = BACKEND_URL;
-console.log("🔌 Connecting to WebSocket server at:", SOCKET_URL);
 
-export const socket = io(SOCKET_URL, {
+// Use environment variables for URLs with secure defaults
+const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3000";
+const isProduction = import.meta.env.PROD;
+
+console.log(`🔌 [${isProduction ? 'PROD' : 'DEV'}] Connecting to WebSocket server at:`, WS_URL);
+
+export const socket = io(WS_URL, {
   // Connection settings
   reconnection: true,
-  reconnectionAttempts: 5,
+  reconnectionAttempts: isProduction ? 10 : 5,
   reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  timeout: 10000,
+  reconnectionDelayMax: 10000,
+  timeout: 20000,
   autoConnect: true,
   withCredentials: true,
-  transports: ['websocket'],
-  upgrade: false,
-  // Try WebSocket first, fall back to polling
-  transports: ["websocket", "polling"],
-  // Enable debug in development
-  debug: import.meta.env.DEV,
-  // Add query parameters for debugging
+  // In production, only use WebSocket (no HTTP long-polling fallback)
+  transports: isProduction ? ["websocket"] : ["websocket", "polling"],
+  // Enable debug only in development
+  debug: !isProduction,
+  // Add client information
   query: {
     clientType: 'browser',
     version: '1.0.0',
+    environment: isProduction ? 'production' : 'development',
   },
+  // Enable secure connection in production
+  secure: isProduction,
+  // Enable compression
+  forceNew: true,
+  // Enable multiplexing (sharing the same connection)
+  multiplex: true,
 });
 
 // Connection handlers

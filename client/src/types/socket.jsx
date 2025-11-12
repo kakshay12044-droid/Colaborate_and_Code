@@ -27,9 +27,11 @@ export const SocketEvent = {
   DRAWING_UPDATE: "drawing-update",
 };
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3000";
 
-export const socket = io(BACKEND_URL, {
+console.log("🔌 WebSocket URL:", WS_URL);
+
+export const socket = io(WS_URL, {
   transports: ["websocket"], 
   reconnection: true,
   reconnectionAttempts: 5,

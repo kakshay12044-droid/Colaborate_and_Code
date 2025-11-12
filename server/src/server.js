@@ -22,6 +22,8 @@ const allowedOrigins = [
   "http://localhost:5173",
   "https://localhost:5173",
   "http://localhost:5174",
+  "https://colaborate-and-code.vercel.app",
+  "wss://colaborate-and-code.vercel.app",
   FRONTEND_URL,
   "https://codeinsync-7ycb.onrender.com",
   "wss://codeinsync-7ycb.onrender.com",
